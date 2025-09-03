@@ -1,62 +1,72 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import os
 
-# ======================
-# 1. Cargar modelo y columnas
-pipeline = joblib.load("ames_price_pipeline.pkl")
-model_columns = joblib.load("model_columns.pkl")
+# --- Configurar rutas ---
+BASE_DIR = os.path.dirname(__file__)
+pipeline_path = os.path.join(BASE_DIR, "ames_price_pipeline.pkl")
+columns_path = os.path.join(BASE_DIR, "model_columns.pkl")
 
-# ======================
-# 2. Título de la app
-st.title("Predicción de precio de viviendas (Ames Housing)")
+# --- Cargar modelo y columnas ---
+pipeline = joblib.load(pipeline_path)
+model_columns = joblib.load(columns_path)
 
-st.markdown("Introduce las características de la vivienda:")
+st.title("Predicción de Precio de Vivienda - Ames Housing")
 
-# ======================
-# 3. Inputs para 10 variables más importantes
-# Aquí pon tus 10 variables más importantes según SHAP o RF
-# Ejemplo:
-numeric_vars = {
-    "Gr Liv Area": (500, 4000, 1500),
-    "Total Bsmt SF": (0, 3000, 800),
-    "Garage Cars": (0, 4, 2),
-    "Overall Qual": (1, 10, 5),
-    "House_Age": (0, 150, 20),
-    "Since_Remod": (0, 100, 10),
-    "Garage_Age": (0, 100, 10),
-    "Lot Area": (500, 20000, 5000)
-}
+st.write("""
+Introduce las características de la vivienda para obtener una predicción de precio.
+""")
 
-categorical_vars = {
-    "Neighborhood": ["NAmes", "CollgCr", "OldTown", "Edwards", "Somerst", "Gilbert", "NWAmes", "Sawyer", "SawyerW", "Mitchel"], 
-    "BldgType": ["1Fam", "2fmCon", "Duplex", "TwnhsE", "Twnhs"]
-}
+# --- Lista de las 10 variables más importantes según SHAP ---
+important_vars = [
+    "Overall Qual", "Gr Liv Area", "Garage Cars", "Total Bsmt SF",
+    "1st Flr SF", "Full Bath", "Year Built", "TotRms AbvGrd",
+    "Fireplaces", "Lot Area"
+]
 
-# ======================
-# 3.1 Entradas numéricas
-input_data = {}
-for var, (min_val, max_val, default) in numeric_vars.items():
-    input_data[var] = st.number_input(var, min_value=min_val, max_value=max_val, value=default)
+# Diccionario para almacenar inputs
+user_input = {}
 
-# 3.2 Entradas categóricas
-for var, options in categorical_vars.items():
-    input_data[var] = st.selectbox(var, options)
+# --- Generar inputs dinámicos según tipo ---
+for col in important_vars:
+    # Detectar si es categórica según columnas del modelo
+    cat_cols = [c for c in model_columns if c.startswith(col + "_")]
+    if cat_cols:
+        # Dropdown con todas las categorías
+        options = [c.replace(col + "_", "") for c in cat_cols]
+        user_input[col] = st.selectbox(f"{col}", options)
+    else:
+        # Numérico: input numérico
+        user_input[col] = st.number_input(f"{col}", min_value=0, value=100)
 
-# ======================
-# 4. Convertir a DataFrame y codificar
-df_input = pd.DataFrame([input_data])
+# --- Convertir inputs a DataFrame ---
+input_df = pd.DataFrame([user_input])
 
-# One-Hot Encoding
-df_input_encoded = pd.get_dummies(df_input)
+# --- One-Hot Encoding manual para que coincida con el modelo ---
+for col in input_df.columns:
+    # Si es categórica
+    cat_cols = [c for c in model_columns if c.startswith(col + "_")]
+    if cat_cols:
+        # Crear columnas dummy
+        for dummy in cat_cols:
+            val = dummy.replace(col + "_", "")
+            input_df[dummy] = 1 if input_df[col][0] == val else 0
+        input_df.drop(columns=[col], inplace=True)
 
-# Asegurar todas las columnas del modelo
-df_input_encoded = df_input_encoded.reindex(columns=model_columns, fill_value=0)
+# --- Añadir columnas faltantes en caso de que falten ---
+for c in model_columns:
+    if c not in input_df.columns:
+        input_df[c] = 0
 
-# ======================
-# 5. Predicción
+# --- Reordenar columnas ---
+input_df = input_df[model_columns]
+
+# --- Botón para predecir ---
 if st.button("Predecir precio"):
-    pred_log = pipeline.predict(df_input_encoded)[0]
-    pred_real = np.expm1(pred_log)
-    st.success(f"💰 Precio estimado: ${pred_real:,.2f}")
+    # Predecir
+    log_price = pipeline.predict(input_df)[0]
+    price = np.expm1(log_price)  # revertir log1p
+    st.success(f"💰 Precio estimado: {price:,.2f} €")
