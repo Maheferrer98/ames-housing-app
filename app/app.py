@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 
 # Cargar modelo
-pipeline = joblib.load("ames_pipeline_ct.pkl")
+pipeline = joblib.load("app/ames_pipeline_ct.pkl")
 model_columns = joblib.load("model_columns.pkl")
 
 st.title("Predicción de Precio de Vivienda Ames")
