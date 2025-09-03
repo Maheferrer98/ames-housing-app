@@ -1,61 +1,68 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import os
 
+# =========================
 # Cargar pipeline y columnas
-pipeline = joblib.load("ames_price_pipeline.pkl")
-model_columns = joblib.load("model_columns.pkl")
+# =========================
+current_dir = os.path.dirname(__file__)
+pipeline_path = os.path.join(current_dir, "ames_price_pipeline.pkl")
+columns_path = os.path.join(current_dir, "model_columns.pkl")
 
+pipeline = joblib.load(pipeline_path)
+model_columns = joblib.load(columns_path)
+
+# =========================
+# Variables más importantes
+# =========================
+# Ajusta esta lista según tu análisis SHAP
+top_10_features = model_columns[:10]  # O puedes reemplazar por la lista exacta de top 10
+
+# Dividir numéricas y categóricas
+numeric_features = [f for f in top_10_features if "_ " not in f and f in model_columns]
+categorical_features = [f for f in top_10_features if f not in numeric_features]
+
+# =========================
+# Interfaz Streamlit
+# =========================
 st.title("Predicción de Precio de Vivienda - Ames Housing")
 
-st.markdown("Introduce las características de la vivienda:")
+st.write("Introduce las características de la vivienda:")
 
-# --- VARIABLES NUMÉRICAS ---
-GrLivArea = st.number_input("Superficie habitable (sq ft)", min_value=300, max_value=6000, value=1500)
-TotalBsmtSF = st.number_input("Superficie sótano (sq ft)", min_value=0, max_value=3000, value=800)
-GarageCars = st.number_input("Plazas de garaje", min_value=0, max_value=5, value=2)
-OverallQual = st.number_input("Calidad general (1-10)", min_value=1, max_value=10, value=6)
-HouseAge = st.number_input("Edad de la vivienda (años)", min_value=0, max_value=150, value=30)
-SinceRemod = st.number_input("Años desde remodelación", min_value=0, max_value=100, value=10)
-GarageAge = st.number_input("Edad del garaje (años)", min_value=0, max_value=100, value=20)
+# Diccionarios para guardar los inputs
+input_dict = {}
 
-# --- VARIABLES CATEGÓRICAS ---
-Neighborhood = st.selectbox("Vecindario", ["NAmes", "CollgCr", "OldTown", "Edwards", "Somerst"])
-BldgType = st.selectbox("Tipo de edificio", ["1Fam", "2fmCon", "Duplex", "TwnhsE"])
-HouseStyle = st.selectbox("Estilo de casa", ["1Story", "2Story", "1.5Fin", "SLvl"])
-RoofStyle = st.selectbox("Estilo de techo", ["Gable", "Hip", "Flat"])
-CentralAir = st.selectbox("Aire acondicionado central", ["Y", "N"])
+# Inputs numéricos
+for feature in numeric_features:
+    min_val = 0
+    max_val = 10000  # ajusta según feature real
+    input_dict[feature] = st.number_input(feature, min_value=min_val, max_value=max_val, value=0)
+
+# Inputs categóricos
+for feature in categorical_features:
+    # Extraer categorías del dataset original
+    cat_cols = [c for c in model_columns if c.startswith(feature + "_")]
+    options = [c.replace(feature + "_", "") for c in cat_cols]
+    if options:
+        selected = st.selectbox(f"{feature}", options)
+        # Crear one-hot
+        for opt in options:
+            input_dict[f"{feature}_{opt}"] = 1 if opt == selected else 0
+    else:
+        # En caso de que no haya categorías disponibles
+        st.warning(f"No hay opciones para {feature}")
 
 # Botón de predicción
 if st.button("Calcular precio"):
+    input_df = pd.DataFrame([input_dict], columns=model_columns)
+    
+    try:
+        log_price = pipeline.predict(input_df)[0]
+        price = np.expm1(log_price)  # Inversa de log1p
+        st.success(f"💰 Precio estimado: ${price:,.2f}")
+    except Exception as e:
+        st.error(f"Error al calcular el precio: {e}")
 
-    # Crear dict con input del usuario
-    input_data = {
-        "Gr Liv Area": GrLivArea,
-        "Total Bsmt SF": TotalBsmtSF,
-        "Garage Cars": GarageCars,
-        "Overall Qual": OverallQual,
-        "House_Age": HouseAge,
-        "Since_Remod": SinceRemod,
-        "Garage_Age": GarageAge,
-        # Categóricas en One-Hot
-        f"Neighborhood_{Neighborhood}": 1,
-        f"BldgType_{BldgType}": 1,
-        f"HouseStyle_{HouseStyle}": 1,
-        f"RoofStyle_{RoofStyle}": 1,
-        f"CentralAir_{CentralAir}": 1
-    }
-
-    # Crear DataFrame con todas las columnas que espera el modelo
-    input_df = pd.DataFrame([input_data])
-    for col in model_columns:
-        if col not in input_df.columns:
-            input_df[col] = 0
-    input_df = input_df[model_columns]
-
-    # Predicción
-    log_price = pipeline.predict(input_df)[0]
-    price = np.expm1(log_price)
-
-    st.success(f"💰 Precio estimado: ${price:,.2f}")
